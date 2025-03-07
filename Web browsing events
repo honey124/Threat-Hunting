@@ -1,0 +1,12 @@
+KQL  query for finding web browsing events:
+This query is designed to identify web browsing activity on a specific user’s device over the past 30 days. 
+It filters the successful network connection events, focusing on web traffic (i.e., remote URLs), 
+and returns important details like the device name, the initiating process, and the associated IP addresses.
+
+DeviceNetworkEvents
+| where ActionType == "ConnectionSuccess"
+| where isnotempty(RemoteUrl)  // Use isnotempty to ensure there is a value in RemoteUrl
+| where InitiatingProcessAccountUpn == "USER_NAME"  // Replace USER_NAME with the actual UPN
+| where TimeGenerated > ago(30d)
+| project TimeGenerated, DeviceName, RemoteUrl, RemoteIP, InitiatingProcessAccountName, InitiatingProcessFileName, ReportId
+| order by TimeGenerated desc
