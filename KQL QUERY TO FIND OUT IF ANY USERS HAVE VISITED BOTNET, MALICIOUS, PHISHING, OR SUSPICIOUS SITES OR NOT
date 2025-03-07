@@ -1,0 +1,15 @@
+KQL QUERY TO FIND OUT IF ANY USERS HAVE VISITED BOTNET, MALICIOUS, PHISHING, OR SUSPICIOUS SITES OR NOT
+
+The query can be used for identifying possible coordinated attacks or unusual activity across multiple users within a 1-hour window. 
+The activities could indicate an ongoing security threat, such as a botnet attack, phishing attempt, or other malicious activity involving multiple users.
+
+CommonSecurityLog
+| where DeviceVendor == "Zscaler"
+| where DeviceProduct == "NSSWeblog"
+| where DeviceEventCategory has_any ("Botnet","Malicious","Phishing","Suspicious")
+| where SourceUserName contains "SOURCEUSERNAME"
+| summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), URLCategory = make_set(DeviceEventCategory), ApplicationProtocol = make_set(ApplicationProtocol), SourceUsers = make_set(SourceUserName), DstIp = make_set(DestinationIP), FileType = make_set(FileType), URL = make_set(RequestURL), Method = make_set(RequestMethod),SrcIp = make_set(SourceTranslatedAddress),SrcIpPublic = make_set(SourceIP), SourceUserCount = dcount(SourceUserName), DstIpCount = dcount(DestinationIP), count() by DestinationHostName, bin(TimeGenerated,1h)
+| where SourceUserCount > 5
+| mv-expand SourceUsers
+| extend SourceUsers = tostring(SourceUsers)
+| summarize StartTime = min(StartTime), EndTime = max(EndTime), URLCategory = make_set(URLCategory), ApplicationProtocol = make_set(ApplicationProtocol), SourceUsers = make_set(SourceUsers), DstIp = make_set(DstIp), FileType = make_set(FileType), URL = make_set(URL), Method = make_set(Method),SrcIp = make_set(SrcIp),SrcIpPublic = make_set(SrcIpPublic), SourceUserCount = dcount(SourceUsers), count() by DestinationHostName
