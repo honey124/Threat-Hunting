@@ -1,7 +1,8 @@
-KQL  query for finding web browsing events:
+**KQL  query for finding web browsing events:**
 This query is designed to identify web browsing activity on a specific user’s device over the past 30 days. 
 It filters the successful network connection events, focusing on web traffic (i.e., remote URLs), 
 and returns important details like the device name, the initiating process, and the associated IP addresses.
+
 
 DeviceNetworkEvents
 | where ActionType == "ConnectionSuccess"
