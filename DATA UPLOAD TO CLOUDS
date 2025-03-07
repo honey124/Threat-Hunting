@@ -1,0 +1,9 @@
+DATA UPLOAD TO PUBLIC CLOUDS:
+
+The following KQL query is used to check for DNS requests to popular public cloud apps and public cloud storage apps:
+
+DeviceNetworkEvents
+| where InitiatingProcessAccountName == "INITIATINGPROCESSACCOUNTNAME"
+| where RemoteUrl has_any ("drive.google.com", "www.box.com", "www.icloud.com", "onedrive.live.com", "www.sync.com", "drive.proton.me", "www.zoho.com/workdrive", "www.jottacloud.com", "koofr.eu")
+| project TimeGenerated, DeviceName, ActionType
+| order by TimeGenerated desc
