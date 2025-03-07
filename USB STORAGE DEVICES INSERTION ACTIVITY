@@ -1,0 +1,7 @@
+USB STORAGE DEVICES INSERTION ACTIVITY
+
+This query is used to monitor device events related to USB storage devices and other USB-related activities specifically for a particular user.
+
+DeviceEvents
+| where ActionType in ("Plug and Play", "USB event", "USB storage device", "UsbDriveMounted")
+| where InitiatingProcessAccountUpn == "INITIATINGPROCESSACCOUNTUPN" // Filter by the specific use
