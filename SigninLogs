@@ -1,4 +1,4 @@
-**SigninLogs**:
+SigninLogs:
 This query is designed to retrieve sign-in logs for a specific user, identified by their UserPrincipalName, from the past 30 days. 
 It selects the following information for each log entry, which can be useful for auditing sign-in activities and analyzing user access patterns
 
