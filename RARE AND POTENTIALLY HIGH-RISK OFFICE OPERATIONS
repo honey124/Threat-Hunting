@@ -1,0 +1,23 @@
+Rare and Potentially High-Risk Office Operations:
+
+This query is designed to analyze OfficeActivity logs in a Microsoft 365 environment, focusing on specific operations related to mailbox permissions, role assignments, inbox rules, and similar actions. 
+It also ensures that system account activities are excluded, highlighting only user-related actions.
+
+Specifically, the query:
+Filters out irrelevant system operations performed by predefined system accounts. Targets operations related to mailbox permissions, inbox rules, and transport rules within Exchange.
+Extracts and refines the ClientIP to isolate the IP address. Splits the UserId into the account name and domain suffix for detailed analysis.
+The purpose of this query is to monitor user activity for critical mailbox-related operations, offering insights into potential changes or suspicious activities involving a user’s mailbox or Exchange settings.
+
+// The query_now parameter represents the time (in UTC) at which the scheduled analytics rule ran to produce this alert.
+set query_now = datetime(2025-03-04T16:32:13.6478615Z);
+
+OfficeActivity
+| where UserId contains "USERID"
+| where Operation in~ ("Add-MailboxPermission", "Add-MailboxFolderPermission", "Set-Mailbox", "New-ManagementRoleAssignment", "New-InboxRule", "Set-InboxRule", "Set-TransportRule")
+| and not (UserId has_any ('NT AUTHORITY\\SYSTEM (Microsoft.Exchange.ServiceHost)', 'NT AUTHORITY\\SYSTEM (Microsoft.Exchange.AdminApi.NetCore)', 'NT AUTHORITY\\SYSTEM (w3wp)', 'devilfish-applicationaccount') and Operation in~ ("Add-MailboxPermission", "Set-Mailbox"))
+| extend ClientIPOnly = tostring(extract_all(@'\[?(::ffff:)?(?P<IPAddress>(\d+\.\d+\.\d+\.\d+)|[^\]]+)\]?', dynamic(["IPAddress"]), ClientIP)[0])
+| extend AccountName = tostring(split(UserId, "@")[0]), AccountUPNSuffix = tostring(split(UserId, "@")[1])
+
+
+
+
