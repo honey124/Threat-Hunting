@@ -1,0 +1,196 @@
+HUNTING ANOMALIES USING REGISTRY:
+
+Threat hunting using Windows registry anomalies is an effective way to detect malicious activity, as many malware and advanced persistent threats (APTs) make changes to the Windows registry to maintain persistence, 
+escalate privileges, or perform other malicious activities. By identifying unusual or unauthorized changes in the registry, threat hunters can uncover and investigate potential threats.
+Registry anomalies are a critical vector for detecting and responding to threats. By regularly monitoring and analyzing registry changes, threat hunters can uncover early signs of compromise, 
+persistent malware, or other malicious activities. Always correlate registry data with other sources and leverage threat intelligence to identify specific threats and prevent or mitigate attacks effectively.
+
+Here are key steps and techniques for threat hunting using registry anomalies:
+1. Identify Registry Keys of Interest
+Certain registry keys are commonly targeted by attackers:
+Persistence-related keys: Malware often creates or modifies entries that ensure it starts automatically when the system boots. 
+•	HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+•	HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+•	HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce
+
+Privilege escalation: Keys that allow privilege elevation. 
+•	HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Lsa
+
+Scheduled tasks: Keys related to scheduled tasks and services. 
+•	HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks
+
+File system redirection: Malicious actors may redirect execution paths or DLLs. 
+•	HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths
+
+2. Monitor for Unusual Changes
+Once you have identified the critical registry keys, establish a baseline for what "normal" changes look like. 
+Then, any modification outside of normal activities can be treated as suspicious and worthy of investigation.
+Unexpected values: New registry keys or values that were not part of the baseline.
+Changes in startup entries: Unauthorized entries in the Run or RunOnce keys can indicate malicious persistence mechanisms.
+Creation of new registry keys: New or modified keys, especially in areas that are known to be used by malware for persistence or privilege escalation, should be scrutinized.
+Modification of permissions: Malware may change access controls (permissions) of registry keys to prevent detection or tampering.
+
+3. Correlate Registry Events with Other Indicators
+Registry anomalies should be correlated with other data sources for a more comprehensive threat hunt:
+Event logs: Look for logs related to the creation or modification of registry keys (Event IDs like 4663 in Security Logs).
+File system activity: Investigate suspicious file modifications that might correspond with registry changes.
+Network activity: Certain registry changes might be triggered by or correlated with malicious network traffic (e.g., C2 communication or exploitation).
+Behavioral indicators: Check for suspicious processes, services, or applications associated with registry changes.
+
+
+4. Use Registry Monitoring Tools
+To aid in detection, you can use automated tools to monitor and alert on registry changes:
+Sysinternals Suite: Tools like Procmon (Process Monitor) can capture and log registry changes.
+Audit Registry Access: Windows has built-in auditing capabilities (via Group Policy) that can monitor registry access.
+SIEM Systems: SIEM solutions (like Splunk or ELK stack) can aggregate registry event logs and identify patterns or anomalies.
+
+
+5. Look for Common Indicators of Compromise (IOCs)
+When hunting for threats, comparing registry anomalies against known IOCs can help identify specific threats:
+Hash values of known malicious files referenced in registry keys.
+Known registry paths or keys used by specific malware families.
+Malicious signed applications (Look for signatures of known malicious software).
+
+
+6. Leverage Threat Intelligence
+Use threat intelligence feeds to identify registry keys and values used by known malware or adversaries. 
+Many threat actors follow similar tactics, techniques, and procedures (TTPs) outlined in frameworks like MITRE ATT&CK, 
+which can give you specific registry-related indicators to look for:
+•	T1071: Application Layer Protocol (often involves registry manipulation for persistence).
+•	T1053: Scheduled Task/Job (registry changes often correlate with task creation).
+•	T1107: File System/Registry Deletion (related to clearing tracks).
+
+7. Look for Lateral Movement or Exfiltration
+Threat actors often use registry modifications to move laterally or exfiltrate data:
+Check for modifications related to remote desktop protocols (RDP), WMI (Windows Management Instrumentation), or PowerShell, which may be used to execute malicious code across the network.
+Look for anomalies in registry entries that might indicate new users, groups, or suspicious remote connections.
+
+8. Perform an In-depth Analysis
+Once an anomaly is detected, perform the following investigative steps:
+Identify the process: Determine which process initiated the registry change (using tools like Procmon or Event Viewer).
+Check file system artifacts: If the registry change is related to a file, check the file's properties (e.g., hash, location).
+Investigate the origin: Determine if the registry change was initiated from an internal or external system.
+
+9. Look for Post-Exploitation Activities
+Post-exploitation activities often involve the registry to maintain persistence or enable additional attacks. Some common post-exploitation registry actions include:
+•	Adding new admin accounts or modifying user privileges.
+•	Setting up keylogging or credential harvesting mechanisms.
+•	Configuring malicious proxy or backdoor settings in the registry.
+
+10. Document and Report Findings
+Any findings of suspicious registry changes should be thoroughly documented, including:
+•	The registry keys and values that were modified.
+•	The processes or events that triggered the modification.
+•	Correlation with other anomalous behavior.
+•	Recommendations for mitigating the threat.
+
+Few Registry paths and explanation about them:
+
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+> The registry path is an important location in the Windows Registry. It is used to store information about programs that should automatically run when the system starts up.
+
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+> The registry path HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run is similar to the path we discussed earlier (HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run), 
+but it is specifically tied to the current user of the Windows operating system rather than the entire system.
+
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce
+> This registry path is a special key in the Windows Registry that is used to execute programs or scripts only once, the next time the system is started or the current user logs in.
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Lsa
+> This registry path HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Lsa refers to a key in the Windows Registry that contains configuration settings for the Local Security Authority (LSA). 
+The LSA is a component of Windows that is responsible for enforcing the security policy on the system, including managing user authentication and generating security tokens.
+
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\WindowsNT\CurrentVersion\Schedule\TaskCache\Tasks
+> This registry path is part of the Windows registry that stores information about scheduled tasks that have been created and scheduled to run on a system. Specifically, 
+this key contains data related to the Task Scheduler feature in Windows, which is used to schedule and automate the execution of programs, scripts, or tasks at specific times or in response to certain triggers.
+
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths
+> This registry path Paths is a part of the Windows registry that defines specific locations and executable paths for applications. 
+This registry key is used by Windows to resolve the file paths for applications, ensuring that they can be easily launched from the command line or from anywhere in the system, regardless of the working directory.
+
+HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer
+> The registry path is a key location within the Windows Registry that contains various configuration settings related to File Explorer and user-specific behaviours in Windows. 
+This key holds settings that impact the functionality and appearance of File Explorer for the currently logged-in user.
+
+
+HKCU\SOFTWARE\Classes
+> This registry path is a key within the Windows Registry that is used to store user-specific settings related to file associations, COM object registrations, and application-related settings. 
+This key controls how Windows handles files, protocols, and file extensions for the currently logged-in user, affecting how the operating system interacts with various file types and applications.
+
+HKCU\SOFTWARE\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache
+> 	MuiCache: This key stores data about recently accessed files or applications, helping Windows display these items in a more efficient way, such as in the "Quick Access" section or the Start menu. 
+MUI (Multilingual User Interface) caching helps with the localization of user interface elements and makes access to frequently used programs quicker.
+
+
+HKLM\SYSTEM\CurrentControlSet\Enum\USB
+> This registry path is part of the Windows registry and refers to a location that stores information about the USB devices connected to the system. 
+
+
+HKLM\SYSTEM\CurrentControlSet\Enum\USBSTOR
+> This registry path is part of the Windows registry that contains information about USB storage devices (such as USB flash drives, external hard drives, and USB-based SSDs) that have been connected to the system.
+
+HKLM\SYSTEM\MountedDevices
+> This registry path is another important location within the Windows registry that tracks mounted storage devices and their drive letters. 
+This key holds information about the storage devices that have been mounted (i.e., those that are connected to the system and assigned drive letters, like hard drives, SSDs, USB drives, etc.).
+
+
+HKLM\SOFTWARE\Microsoft\Windows Portable Devices\Devices
+> This registry path is part of the Windows registry that holds information about portable devices (such as smartphones, MP3 players, digital cameras, 
+and other portable media devices) that have been connected to the system.
+
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\EMDMgmt
+> This registry key in Windows is related to the Enterprise Management Device (EMD), which is used for managing and configuring enterprise devices, 
+particularly in environments where mobile device management (MDM) solutions or other enterprise tools are in use. This registry path is primarily relevant for IT administrators and system management.
+
+> The EMDMgmt key can store information related to the management of devices, like mobile devices, managed PCs, or similar devices, in an enterprise setting. 
+It can be involved in settings that control how Windows interacts with management frameworks used in corporate environments, such as through Group Policy or other enterprise management tools.
+
+HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Mountpoints2
+> This registry key is part of the Windows registry that stores information about the drives or devices that have been mounted (or connected) to the system, 
+such as USB drives, network shares, or other external storage devices. When a user connects a device to their computer, Windows assigns it a "mount point," 
+which can be a drive letter (like E:\, F:\, etc.) or a network location. 
+
+HKLM\SYSTEM\CurrentControlSet\Control\TimeZoneInformation
+> This registry key in Windows contains information about the system's time zone settings. This key stores various values that help Windows manage the system's time zone and Daylight Saving Time (DST) adjustments.
+
+HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName
+> This registry key in Windows stores the computer's name as configured on the system. 
+This key contains the name that Windows assigns to your computer and is used for identification in the network, as well as in system settings.
+
+HKLM\SYSTEM\CurrentControlSet\services\LanmanServer\Shares
+> This registry key in Windows is part of the configuration for Windows File Sharing. 
+It contains information about the network shares that are currently available on the system, specifically those shared through the Server Message Block (SMB) protocol.
+
+HKLM\SYSTEM\CurrentControlSet\services\Tcpip\Parameters\Interfaces
+> This registry key is a critical part of the network configuration in Windows. 
+It contains settings and configuration data for the various network interfaces (e.g., Ethernet adapters, Wi-Fi, VPN adapters) that are connected to the system. This key is associated with the TCP/IP stack, which is responsible for network communication on Windows systems.
+
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\HomeGroup
+> This registry key in Windows stores information related to HomeGroup settings. 
+HomeGroup is a feature that was introduced in Windows 7 and allows users to share files, printers, and other resources easily with other PCs on the same local network. However, it's important to note that HomeGroup was deprecated in Windows 10 version 1803 and later versions. Microsoft removed the feature, and now sharing is handled primarily through other methods like network sharing and OneDrive.
+
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\{GUID}
+> This registry key contains information about network profiles in Windows. 
+Each network profile is associated with a GUID (Globally Unique Identifier) and corresponds to a specific network connection, such as a Wi-Fi or Ethernet network. 
+These profiles help manage settings and configurations for different networks that the computer connects to.
+
+HKLM\SOFTWARE\Microsoft\WZCSVC\Parameters\Interfaces\{GUID}
+> This registry key is related to the configuration of Wireless Zero Configuration (WZC) service on Windows systems. 
+Wireless Zero Configuration (WZC) was a service in earlier versions of Windows (Windows XP and Vista) that automatically managed wireless network connections. 
+It handled tasks such as connecting to wireless networks, configuring network settings, and managing wireless profiles. 
+The {GUID} represents a unique identifier for each wireless network interface (such as a Wi-Fi adapter) on the system,
+and the registry key stores settings related to each wireless network interface managed by the WZCSVC service.
+
+HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache
+> This registry key is part of the Windows Application Compatibility infrastructure. It stores information about applications that have been run on the system, 
+specifically focusing on compatibility settings, including the execution history and whether certain applications might have compatibility issues.
+
+HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters
+> This registry key in Windows controls settings related to Prefetching and Superfetch (also known as SysMain in newer versions of Windows). 
+These features are designed to improve system performance by preloading frequently used applications and data into memory.
+
+Introduction to Windows Forensics which Talks about Registry anomalies:
+https://www.youtube.com/watch?v=VYROU-ZwZX8
+
+Registry explorer: Download Link: https://f001.backblazeb2.com/file/EricZimmermanTools/net6/RegistryExplorer.zip
+
