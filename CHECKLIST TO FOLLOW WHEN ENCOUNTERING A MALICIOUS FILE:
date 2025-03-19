@@ -1,0 +1,27 @@
+CHECKLIST TO FOLLOW WHEN ENCOUNTERING A MALICIOUS FILE:
+
+// Use this to check how the file got into the machine: 
+union Device*
+| where DeviceName contains "Sim_EKB_Install_2018_11_14.exe"
+| where * contains "PYXXW.exe"
+
+
+// Use this to check if any network connections are there or not from the Process:"PYXXW.exe"
+DeviceNetworkEvents
+| where InitiatingProcessFileName == "Sim_EKB_Install_2018_11_14.exe"
+| project Timestamp, InitiatingProcessFileName, RemoteUrl, RemotePort, ActionType, DeviceName
+| order by Timestamp desc
+
+
+// User this to check if any Child Process or Dlls files were created from the process "PYXXW.exe": 
+DeviceProcessEvents
+| where InitiatingProcessFileName == "Sim_EKB_Install_2018_11_14.exe"
+| project Timestamp, DeviceName, ProcessId, InitiatingProcessFileName, FileName, ActionType, ProcessCommandLine, ReportId
+| order by Timestamp desc
+
+
+// User this to check for registry modification activities performed by the process PYXXW.exe
+DeviceRegistryEvents
+| where InitiatingProcessFileName == "Sim_EKB_Install_2018_11_14.exe"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RegistryKey, RegistryValueName, RegistryValueType, RegistryValueData, ActionType, ReportId
+| order by Timestamp desc
