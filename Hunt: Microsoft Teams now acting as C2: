@@ -1,0 +1,18 @@
+Hunt: Microsoft Teams now acting as C2:
+
+Command and Control infrastructure enabling Red Teamers to execute system commands on compromised hosts via Microsoft Teams. 
+It embeds data into hidden span tags within Microsoft Teams messages and exfiltrates command results through Adaptive Cards image URLs, triggering out-of-bound requests to a C2 server. 
+The absence of direct communication between the victim and attacker, along with the victim only sending HTTP requests to Microsoft servers and antiviruses not scanning MS Teams log files, 
+makes detection more challenging.
+
+// Query to find execution of specific commands or executables
+
+DeviceProcessEvents
+| where ProcessCommandLine has "wget" and ProcessCommandLine has "https://github.com/cxnturi0n/convoC2/releases/download/v0.1.0-alpha/convoC2_server_amd64.tar.gz" and ProcessCommandLine has "tar -xzvf convoC2_server_amd64.tar.gz --one-top-level"
+    or ProcessCommandLine has "convoC2"
+    or ProcessCommandLine has "convoC2_agent.exe -h"
+| project Timestamp, DeviceName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine, ReportId
+
+Reference:
+https://github.com/cxnturi0n/convoC2/
+https://www.youtube.com/watch?v=FqZIm6vP7XM
