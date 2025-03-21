@@ -1,8 +1,8 @@
-CHECKLIST TO FOLLOW WHEN ENCOUNTERING A MALICIOUS FILE:
+Checklist to follow when encountering a malicious file:
 
 // Use this to check how the file got into the machine: 
 union Device*
-| where DeviceName contains "Sim_EKB_Install_2018_11_14.exe"
+| where DeviceName contains "DEVICE"
 | where * contains "PYXXW.exe"
 
 
@@ -25,3 +25,30 @@ DeviceRegistryEvents
 | where InitiatingProcessFileName == "Sim_EKB_Install_2018_11_14.exe"
 | project Timestamp, DeviceName, InitiatingProcessFileName, RegistryKey, RegistryValueName, RegistryValueType, RegistryValueData, ActionType, ReportId
 | order by Timestamp desc
+
+
+//This query detects changes to Windows startup registry keys, commonly targeted by malware to control startup programs:
+DeviceRegistryEvents 
+| where DeviceName contains "DEVICE" 
+| where ActionType == "RegistryValueSet" 
+| where RegistryKey contains @"\Software\Microsoft\Windows\CurrentVersion\Run" or RegistryKey contains @"\Software\Microsoft\Windows\CurrentVersion\RunOnce" or RegistryKey contains @"\Software\Microsoft\Windows\CurrentVersion\RunServices" or RegistryKey contains @"\Software\Microsoft\Windows\CurrentVersion\RunServicesOnce" or RegistryKey contains @"\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run"
+ 
+
+This query tracks file events in Windows startup folders on a specific device to detect potential harmful programs:
+DeviceFileEvents 
+| where DeviceName contains "DEVICE" 
+| where FolderPath contains @"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" or FolderPath contains @"C:\Users\Public\Microsoft\Windows\Start Menu\Programs\Startup"
+
+ 
+Find Out if any latralmoment happening on the Machine using below Query:
+DeviceProcessEvents 
+| where DeviceName contains "DEVICE" 
+| where InitiatingProcessFileName in ("psexec.exe", "wmic.exe", "rundll32.exe", "wscript.exe", "cscript.exe", "powershell.exe", "mstsc.exe")
+ 
+
+ 
+let mal_files = dynamic(["uqCNaKBp.exe", "cQeDEquW.exe", "RkMVspVw.exe", "JmcOhMMp.exe", "egZbxBwq.exe", "XwcpLWOC.exe", "wXgTNdUn.exe", "YsfKhspk.exe"]); 
+union DeviceEvents, DeviceProcessEvents, DeviceFileEvents 
+| where FileName has_any (mal_files) or InitiatingProcessFileName has_any (mal_files) or InitiatingProcessCommandLine has_any (mal_files) or ProcessCommandLine has_any (mal_files)
+ 
+
