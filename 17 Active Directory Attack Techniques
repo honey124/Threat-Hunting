@@ -1,1 +1,465 @@
+Microsoft Sentinel KQL – Detecting 17 Active Directory Attack Techniques
 
+Below is a threat-hunting collection of Microsoft Sentinel KQL queries designed to detect the 17 Active Directory attack techniques.
+
+These detections use data from Microsoft Defender for Endpoint (MDE), Windows Security Events, Microsoft Defender for Identity (MDI), Microsoft Entra ID, and other security data sources.
+
+Recommended approach: Use behavior-based detection, correlate multiple telemetry sources, and prioritize suspicious activity over single-event alerts.
+
+## 1. Telemetry sources required
+
+| Data source           | Sentinel table            | Purpose                                                      |
+| --------------------- | ------------------------- | ------------------------------------------------------------ |
+| Defender for Endpoint | `DeviceProcessEvents`     | Process execution, command lines, parent-child relationships |
+| Defender for Endpoint | `DeviceNetworkEvents`     | Network connections and suspicious destinations              |
+| Defender for Endpoint | `DeviceFileEvents`        | Sensitive files accessed, created, or modified               |
+| Defender for Endpoint | `DeviceLogonEvents`       | Authentication activity                                      |
+| Windows Security logs | `SecurityEvent`           | Kerberos, account creation, logons, group changes, AD events |
+| Defender for Identity | `IdentityDirectoryEvents` | AD object changes and identity-related activity              |
+| Defender for Identity | `IdentityLogonEvents`     | Identity authentication activity                             |
+| Entra ID              | `SigninLogs`              | Cloud and hybrid authentication activity                     |
+| Entra ID              | `AuditLogs`               | Identity configuration changes and administrative activity   |
+
+1. Kerberoasting
+MITRE ATT&CK: T1558.003
+What we are hunting: Unusual Kerberos service ticket requests, particularly requests for multiple SPNs, requests originating from unusual users or endpoints, and service-ticket activity targeting privileged accounts.
+Detection – Kerberos service ticket requests (Event ID 4769)
+
+SecurityEvent
+| where EventID == 4769
+| extend RequestingAccount = tostring(Account)
+| extend ServiceName = tostring(ServiceName)
+| extend ClientIP = tostring(IpAddress)
+| summarize ServiceTicketCount = count(), TargetServices = make_set(ServiceName, 100), TargetUsers = make_set(TargetUserName, 100) by RequestingAccount, ClientIP, bin(TimeGenerated, 10m)
+| where ServiceTicketCount >= 10
+| order by ServiceTicketCount desc
+
+Investigate:
+- One user requesting tickets for numerous service accounts.
+- Requests originating from workstations instead of servers.
+- Service accounts with privileged access.
+- Large spikes in ticket requests within a short period.
+
+2. AS-REP Roasting
+MITRE ATT&CK: T1558.004
+What we are hunting: Kerberos authentication attempts against accounts that do not require pre-authentication.
+Event ID 4768 records Kerberos Authentication Ticket (TGT) requests. AS-REP roasting targets accounts where Kerberos pre-authentication is disabled.
+Detection – Kerberos AS-REP activity
+
+SecurityEvent
+| where EventID == 4768
+| extend ClientIP = tostring(IpAddress)
+| extend UserName = tostring(TargetUserName)
+| summarize RequestCount = count(), Accounts = make_set(UserName, 100) by ClientIP, bin(TimeGenerated, 15m)
+| where RequestCount >= 10
+| order by RequestCount desc
+
+
+Important: Event 4768 by itself does not reliably confirm AS-REP roasting. To identify vulnerable accounts, audit the `DONT_REQUIRE_PREAUTH` flag (`0x400000`) in the AD user `userAccountControl` attribute and correlate with suspicious Kerberos requests.
+
+3. Password Spraying
+MITRE ATT&CK: T1110.003
+What we are hunting: A single IP, device, or source repeatedly attempting authentication against numerous accounts with relatively few attempts per account.
+Detection – Windows authentication spray
+
+SecurityEvent
+| where EventID == 4625
+| extend SourceIP = tostring(IpAddress)
+| extend TargetAccount = tostring(TargetUserName)
+| where isnotempty(SourceIP) and isnotempty(TargetAccount)
+| summarize FailedAttempts = count(), TargetAccounts = dcount(TargetAccount), Accounts = make_set(TargetAccount, 100) by SourceIP, bin(TimeGenerated, 15m)
+| where TargetAccounts >= 10 and FailedAttempts >= 15
+| order by TargetAccounts desc
+
+Hunting logic:
+- Many accounts from one IP address.
+- Low or moderate failed attempts per account.
+- Repeated failures followed by a successful login.
+- Attempts against privileged or service accounts.
+
+4. MachineAccountQuota Abuse
+MITRE ATT&CK: T1136.002
+What we are hunting: Unexpected computer-account creation, especially by users who normally do not create computer objects.
+Detection – Computer account creation (Event ID 4741)
+
+SecurityEvent
+| where EventID == 4741
+| extend CreatedComputer = tostring(TargetAccount)
+| extend Creator = tostring(SubjectAccount)
+| project TimeGenerated, Computer, Creator, CreatedComputer, SubjectUserName, SubjectDomainName
+| order by TimeGenerated desc
+
+Investigate:
+- Computer accounts created by regular users.
+- Multiple computer accounts created by the same user.
+- Newly created computer accounts with unusual names.
+- Creation followed by privileged group changes or authentication activity.
+
+5. Unconstrained Delegation
+MITRE ATT&CK: T1558.001
+What we are hunting: Systems configured for unconstrained Kerberos delegation and suspicious authentication activity to those systems.
+Detection – Authentication to systems configured for delegation
+
+SecurityEvent
+| where EventID == 4624
+| where LogonType == 3
+| extend SourceIP = tostring(IpAddress)
+| extend TargetAccount = tostring(TargetUserName)
+| project TimeGenerated, Computer, TargetAccount, SourceIP, AuthenticationPackageName, LogonType
+| order by TimeGenerated desc
+
+
+This query provides network logon context, but it does not independently identify unconstrained delegation.
+
+To detect the configuration itself, monitor AD computer and user objects where the `userAccountControl` attribute contains `TRUSTED_FOR_DELEGATION` (`0x80000`). Correlate those objects with authentication activity and privileged identities.
+
+6. Group Policy Preferences (GPP) Password Theft
+MITRE ATT&CK: T1552.006
+What we are hunting: Access to legacy Group Policy Preference files containing embedded credentials, especially `Groups.xml`, `Services.xml`, `ScheduledTasks.xml`, and other GPP XML files in SYSVOL.
+Detection – Suspicious GPP credential file access
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where ProcessCommandLine has_any ("Groups.xml","Services.xml","ScheduledTasks.xml","DataSources.xml","Drives.xml","Printers.xml")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp desc
+
+Detection – File activity involving GPP XML files
+
+DeviceFileEvents
+| where Timestamp > ago(7d)
+| where FolderPath has "\\SYSVOL\\"
+| where FileName endswith ".xml"
+| where FileName in ("Groups.xml","Services.xml","ScheduledTasks.xml","DataSources.xml","Drives.xml","Printers.xml")
+| project Timestamp, DeviceName, InitiatingProcessAccountName, InitiatingProcessFileName, InitiatingProcessCommandLine, FileName, FolderPath, ActionType
+| order by Timestamp desc
+
+Investigate: XML files copied from SYSVOL to temporary folders, archives, user profiles, or staging directories, especially when associated with PowerShell, command-line utilities, or unusual accounts.
+
+Limitation: `DeviceFileEvents` is not a general-purpose file-read audit table. Reading a file without creating, modifying, or deleting it may not appear. For reliable file-read monitoring, enable appropriate Windows Object Access auditing and SACLs or use EDR telemetry that supports file reads.
+ 
+7. Active Directory Certificate Services (AD CS) Abuse
+MITRE ATT&CK: T1649
+What we are hunting: Suspicious certificate enrollment, unexpected certificate issuance, and abuse of certificate templates.
+Detection – Certificate issuance events
+
+SecurityEvent
+| where EventID in (4886, 4887, 4888)
+| extend Requester = tostring(SubjectUserName)
+| project TimeGenerated, Computer, EventID, Activity, Requester, SubjectUserName, SubjectDomainName, EventData
+| order by TimeGenerated desc
+
+Detection – Certificate enrollment activity on endpoints
+
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where FileName in~ ("certreq.exe","certutil.exe","powershell.exe","pwsh.exe")
+| where ProcessCommandLine has_any ("-submit","-enroll","-request","-template","certreq","certutil")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp desc
+
+Investigate:
+- Certificate enrollment by unexpected users.
+- Enrollment for authentication-capable templates.
+- Certificates issued with unexpected subject names or SANs.
+- Enrollment from non-administrative endpoints.
+- Changes to certificate template permissions or settings.
+- Unusual certificate requests followed by privileged logons.
+
+8. Golden Certificate
+MITRE ATT&CK: Certificate-based identity abuse / AD CS
+What we are hunting: Unauthorized access to CA private keys, certificate forging, and suspicious certificate-based authentication.
+Golden Certificate abuse can be difficult to detect from endpoint telemetry alone. A forged certificate may be created offline and used without generating a normal certificate issuance event.
+Detection – Certificate authority key access and certificate tooling
+
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where FileName in~ ("certutil.exe","certreq.exe","openssl.exe","mimikatz.exe")
+| where ProcessCommandLine has_any ("export","backup","privatekey", "crypto", "ca", "certificate")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp desc
+
+Detection – Suspicious CA-related file activity
+
+DeviceFileEvents
+| where Timestamp > ago(7d)
+| where FolderPath has_any ("\\CertEnroll\\","\\Microsoft\\Crypto\\","\\System32\\CertSrv\\","\\MachineKeys\\")
+| project Timestamp, DeviceName, InitiatingProcessAccountName, InitiatingProcessFileName, InitiatingProcessCommandLine, FileName, FolderPath, ActionType
+| order by Timestamp desc
+
+Investigate: Private-key exports, unexpected CA database backups, CA key file access, suspicious certificate tooling on non-CA systems, and certificates used by unexpected identities.
+
+9. DCSync
+MITRE ATT&CK: T1003.006
+What we are hunting: Attempts to abuse directory replication permissions to retrieve domain credential material.
+Detection – Directory replication permission abuse (Event ID 4662)
+
+SecurityEvent
+| where EventID == 4662
+| where Properties has_any ("1131f6aa-9c07-11d1-f79f-00c04fc2dcd2","1131f6ad-9c07-11d1-f79f-00c04fc2dcd2","89e95b76-444d-4c62-991a-0facbeda640c")
+| project TimeGenerated, Computer, SubjectAccount, SubjectUserName, SubjectDomainName, ObjectName, Properties, Activity
+| order by TimeGenerated desc
+
+
+The GUIDs represent replication-related rights commonly associated with DCSync detection:
+- `DS-Replication-Get-Changes`
+- `DS-Replication-Get-Changes-All`
+- `DS-Replication-Get-Changes-In-Filtered-Set`
+
+Investigate:
+- Replication activity performed by non-domain controllers.
+- Replication rights exercised by service accounts.
+- Accounts with newly assigned replication permissions.
+- Replication requests originating from unexpected hosts.
+
+Prerequisite: Enable Directory Service Access auditing and configure appropriate SACLs so that Event 4662 is generated for relevant directory access. The query depends on the event's `Properties` field containing the replication-rights GUIDs.
+
+10. Dumping NTDS.dit
+MITRE ATT&CK: T1003.003
+What we are hunting: Attempts to access, copy, extract, or stage the Active Directory database and its associated registry hive files.
+Detection – Suspicious NTDS database access commands
+
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where ProcessCommandLine has_any ("ntds.dit","ntdsutil","IFM","InstallFromMedia","vssadmin","diskshadow","esentutl")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp desc
+
+
+Detection – NTDS.dit or related database file activity
+
+DeviceFileEvents
+| where Timestamp > ago(7d)
+| where FileName =~ "ntds.dit" or FileName =~ "SYSTEM" or FileName =~ "ntds.dit.bak"
+| project Timestamp, DeviceName, InitiatingProcessAccountName, InitiatingProcessFileName, InitiatingProcessCommandLine, FileName, FolderPath, ActionType
+| order by Timestamp desc
+
+Investigate:
+- Access or copies of `ntds.dit` outside normal AD maintenance.
+- VSS snapshot creation on domain controllers.
+- Database files copied to unusual directories.
+- Archive creation immediately following database access.
+- Suspicious processes running under privileged accounts.
+
+11. Golden Ticket
+MITRE ATT&CK: T1558.001
+What we are hunting: Forged Kerberos Ticket Granting Tickets (TGTs), abnormal Kerberos authentication, and suspicious domain authentication patterns.
+Detection – Suspicious Kerberos authentication patterns
+
+SecurityEvent
+| where EventID in (4768, 4769, 4624)
+| extend Account = tostring(TargetUserName)
+| extend ClientIP = tostring(IpAddress)
+| extend LogonType = tostring(LogonType)
+| summarize EventCount = count(), EventIDs = make_set(EventID), Services = make_set(ServiceName, 50), EncryptionTypes = make_set(TicketEncryptionType, 20) by Account, ClientIP, Computer, bin(TimeGenerated, 15m)
+| order by EventCount desc
+
+Detection – Suspicious privileged logons
+
+SecurityEvent
+| where EventID == 4624
+| where LogonType in (3, 10)
+| where TargetUserName has_any ("Administrator","admin","svc")
+| project TimeGenerated, Computer, TargetUserName, TargetDomainName, IpAddress, LogonType, AuthenticationPackageName, LogonProcessName
+| order by TimeGenerated desc
+
+Investigate:
+- Kerberos logons from unusual sources.
+- Authentication for privileged identities from non-administrative endpoints.
+- Ticket activity with unexpected encryption types.
+- Privileged logons without corresponding expected authentication patterns.
+
+Golden Ticket detection generally requires behavioral correlation and Defender for Identity detections; individual Kerberos events rarely prove ticket forgery.
+
+12. Silver Ticket
+MITRE ATT&CK: T1558.002
+What we are hunting: Forged Kerberos service tickets used to access services without a legitimate ticket-granting workflow.
+Silver Tickets can be difficult to identify because attackers may forge service tickets without generating the normal Kerberos ticket-request activity expected from a client.
+Detection – Suspicious service authentication
+
+SecurityEvent
+| where EventID == 4624
+| where LogonType in (3, 8)
+| where AuthenticationPackageName =~ "Kerberos"
+| project TimeGenerated, Computer, TargetUserName, TargetDomainName, IpAddress, LogonType, AuthenticationPackageName, LogonProcessName
+| order by TimeGenerated desc
+
+Detection – Kerberos service ticket activity
+
+SecurityEvent
+| where EventID == 4769
+| summarize TicketRequests = count(), SourceIPs = make_set(IpAddress, 50), EncryptionTypes = make_set(TicketEncryptionType, 20) by Account, ServiceName, bin(TimeGenerated, 15m)
+| order by TicketRequests desc
+
+Investigate:
+- Service logons from unexpected devices.
+- Access to services by privileged accounts that do not normally use them.
+- Service authentication without expected client-side ticket activity.
+- Abnormal authentication to SQL, CIFS, HTTP, LDAP, or other Kerberos-enabled services.
+
+13. Golden SAML
+MITRE ATT&CK: T1606.002
+What we are hunting: Suspicious federated authentication, abuse of federation signing capabilities, and unexpected changes to identity federation infrastructure.
+Detection – Suspicious federated sign-ins
+
+SigninLogs
+| where TimeGenerated > ago(7d)
+| where isnotempty(UserPrincipalName)
+| summarize SignInCount = count(), IPAddresses = make_set(IPAddress, 50), Applications = make_set(AppDisplayName, 50), Locations = make_set(Location, 50), UserAgents = make_set(UserAgent, 20), ResultCodes = make_set(ResultType, 20) by UserPrincipalName, bin(TimeGenerated, 30m)
+| order by SignInCount desc
+
+Detection – Federation configuration changes
+
+AuditLogs
+| where TimeGenerated > ago(7d)
+| where Category =~ "ApplicationManagement" or Category =~ "DirectoryManagement"
+| where OperationName has_any ("domain", "federation", "authentication", "certificate", "token")
+| project TimeGenerated, InitiatedBy, OperationName, TargetResources, Result, ResultReason
+| order by TimeGenerated desc
+
+Investigate:
+- Federation configuration changes.
+- Changes to token-signing certificates.
+- Unexpected authentication issuer or federation changes.
+- Sign-ins from unusual IP addresses or devices.
+- Authentication patterns that deviate from normal identity behavior.
+
+14. Microsoft Entra Connect Compromise
+MITRE ATT&CK: T1078 / Identity Infrastructure Compromise
+What we are hunting: Suspicious activity on Entra Connect servers, abuse of synchronization services, credential access, and unauthorized identity synchronization changes.
+Detection – Suspicious execution on Entra Connect servers
+Replace the server names with your actual Entra Connect infrastructure.
+
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where DeviceName in~ ("AADCONNECT01","AADCONNECT02")
+| where FileName in~ ("powershell.exe","pwsh.exe","cmd.exe","rundll32.exe","reg.exe","procdump.exe","mimikatz.exe","7z.exe")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp desc
+
+Detection – Suspicious Entra Connect related activity
+
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where ProcessCommandLine has_any ("ADSync","miiserver","Synchronization Service","AzureAD","Entra")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp desc
+
+Investigate:
+- Unexpected interactive logons to synchronization servers.
+- Credential dumping or LSASS access on Entra Connect hosts.
+- Unauthorized changes to synchronization configuration.
+- Unexpected execution of PowerShell or third-party tools.
+- Privileged accounts used on synchronization infrastructure.
+
+15. One-Way Domain Trust Bypass
+MITRE ATT&CK: Trust Relationship Abuse / Domain Trust Exploitation
+What we are hunting: Changes to domain trusts, unusual cross-domain authentication, and activity involving accounts or systems from trusted domains.
+Detection – Domain trust changes
+
+SecurityEvent
+| where EventID in (4706, 4707, 4716)
+| project TimeGenerated, Computer, EventID, Activity, SubjectAccount, SubjectUserName, SubjectDomainName, EventData
+| order by TimeGenerated desc
+
+Detection – Cross-domain authentication patterns
+
+SecurityEvent
+| where EventID in (4624, 4769)
+| where isnotempty(TargetDomainName)
+| where isnotempty(IpAddress)
+| summarize EventCount = count(), Accounts = make_set(TargetUserName, 100), Services = make_set(ServiceName, 50) by IpAddress, TargetDomainName, Computer, bin(TimeGenerated, 15m)
+| order by EventCount desc
+
+Investigate:
+- Trust configuration changes.
+- Unexpected authentication across domain boundaries.
+- Privileged accounts from trusted domains accessing sensitive systems.
+- Cross-domain authentication from unusual endpoints.
+- Changes to SID filtering or trust security settings.
+
+16. SID History Compromise
+MITRE ATT&CK: T1134.005
+What we are hunting: Changes to the SID History attribute that could allow an attacker to inherit privileges from another security identity.
+Detection – SID History modification (Event ID 4765)
+
+SecurityEvent
+| where EventID == 4765
+| project TimeGenerated, Computer, SubjectAccount, SubjectUserName, SubjectDomainName, TargetAccount, TargetUserName, TargetDomainName, Activity, EventData
+| order by TimeGenerated desc
+
+Detection – Suspicious directory attribute modifications
+
+IdentityDirectoryEvents
+| where Timestamp > ago(7d)
+| where ActionType has_any ("SID","History","Update","Modify")
+| project Timestamp, ActionType, TargetAccountDisplayName, TargetAccountUpn, TargetAccountSid, ActorAccountName, ActorAccountUpn, AdditionalFields
+| order by Timestamp desc
+
+Investigate:
+- SID History additions to privileged accounts.
+- Changes made by non-administrative identities.
+- SID History values associated with privileged groups or legacy domains.
+- Accounts with suspicious SID History values followed by privileged authentication.
+
+17. Skeleton Key
+MITRE ATT&CK: Credential Access / Modify Authentication Process
+What we are hunting: Attempts to tamper with domain controller authentication mechanisms, manipulate LSASS, or modify authentication-related processes and services.
+Skeleton Key is particularly challenging to detect because it involves authentication-process tampering on a domain controller and may not generate an obvious, unique event.
+Detection – Suspicious process activity on domain controllers
+
+Replace the domain controller names with your actual DC inventory.
+
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where DeviceName in~ ("DC01", "DC02", "DC03")
+| where FileName in~ ( "mimikatz.exe", "procdump.exe","rundll32.exe", "powershell.exe", "pwsh.exe","taskmgr.exe")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp desc
+
+Detection – Suspicious process tampering events
+
+DeviceEvents
+| where Timestamp > ago(7d)
+| where DeviceName in~ ("DC01", "DC02", "DC03")
+| where ActionType contains "Tampering" or ActionType contains "Lsass" or ActionType contains "Credential"
+| project Timestamp, DeviceName, ActionType, FileName, InitiatingProcessFileName, InitiatingProcessCommandLine, AccountName, AdditionalFields
+| order by Timestamp desc
+
+Detection – Service installation or modification on domain controllers
+
+SecurityEvent
+| where EventID in (4697, 7045)
+| where Computer has_any ("DC01","DC02","DC03")
+| project TimeGenerated, Computer, EventID, SubjectAccount, SubjectUserName, ServiceName, ServiceFileName, Activity, EventData
+| order by TimeGenerated desc
+
+Investigate:
+- Unexpected tools accessing or modifying LSASS.
+- Process injection or tampering alerts on domain controllers.
+- Unauthorized DLL loading or modification of authentication components.
+- Unexpected services installed on DCs.
+- Suspicious authentication behavior following process tampering.
+
+Summary – Detection Coverage Matrix
+| #  | Attack technique          | Primary detection source                   | Key event / telemetry             |
+| -- | ------------------------- | ------------------------------------------ | --------------------------------- |
+| 1  | Kerberoasting             | `SecurityEvent`                            | 4769                              |
+| 2  | AS-REP Roasting           | `SecurityEvent`                            | 4768                              |
+| 3  | Password Spraying         | `SecurityEvent`                            | 4625                              |
+| 4  | MachineAccountQuota Abuse | `SecurityEvent`                            | 4741                              |
+| 5  | Unconstrained Delegation  | `SecurityEvent` / AD configuration         | 4624 + delegation flags           |
+| 6  | GPP Password Theft        | `DeviceProcessEvents` / `DeviceFileEvents` | SYSVOL XML access                 |
+| 7  | AD CS Abuse               | `SecurityEvent` / process telemetry        | 4886, 4887, 4888                  |
+| 8  | Golden Certificate        | MDE / CA auditing                          | CA key and certificate abuse      |
+| 9  | DCSync                    | `SecurityEvent`                            | 4662                              |
+| 10 | NTDS.dit Dumping          | `DeviceProcessEvents` / `DeviceFileEvents` | Database access / VSS             |
+| 11 | Golden Ticket             | `SecurityEvent` / MDI                      | 4768, 4769, 4624                  |
+| 12 | Silver Ticket             | `SecurityEvent` / MDI                      | 4624, 4769                        |
+| 13 | Golden SAML               | `SigninLogs` / `AuditLogs`                 | Federation and sign-in anomalies  |
+| 14 | Entra Connect Compromise  | `DeviceProcessEvents` / `AuditLogs`        | Sync server compromise            |
+| 15 | One-Way Trust Bypass      | `SecurityEvent`                            | 4706, 4707, 4716                  |
+| 16 | SID History Compromise    | `SecurityEvent` / MDI                      | 4765                              |
+| 17 | Skeleton Key              | MDE / DC security logs                     | LSASS tampering / service changes |
+
+Recommended Hunting strategy in Microsoft Sentinel:
+Important before Hunting: These queries are hunting starting points, not all production-ready analytic rules. Some Windows event fields differ depending on the connector, parser, and log configuration. Validate the field names against your Sentinel environment, especially in `SecurityEvent`, `IdentityDirectoryEvents`, and `DeviceEvents`.
